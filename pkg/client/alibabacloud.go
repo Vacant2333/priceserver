@@ -42,7 +42,7 @@ func ExtractAlibabaCloudAKSKPool() []AKSKPair {
 		return nil
 	}
 
-	akskPair := []AKSKPair{}
+	var akskPair []AKSKPair
 	for _, aksk := range strings.Split(akskPool, ",") {
 		aksk = strings.TrimSpace(aksk)
 		if aksk == "" {
@@ -113,13 +113,20 @@ func (a *AlibabaCloudPriceClient) Run(ctx context.Context) {
 	}
 }
 
+func getTargetFormatDate() string {
+	timeTarget := time.Now().In(time.UTC)
+	// if the current time is, like 14:00:1, if we use 14:00:00, there maybe no entries, let's go with one hour earlier
+	return fmt.Sprintf("%04d-%02d-%02dT%02d:00:00Z",
+		timeTarget.Year(), timeTarget.Month(), timeTarget.Day(), timeTarget.Hour()-1)
+}
+
 func getSpotPrice(client *ecsclient.Client, region, instanceType string) (map[string]float64, error) {
+	timeCurrent := getTargetFormatDate()
 	describeSpotPriceHistoryRequest := &ecsclient.DescribeSpotPriceHistoryRequest{
 		RegionId:     tea.String(region),
 		InstanceType: tea.String(instanceType),
 		NetworkType:  tea.String("vpc"),
-		// With following time range, we get only one entry for eatch zones
-		StartTime: tea.String("2024-10-09T06:00:00Z"),
+		StartTime:    tea.String(timeCurrent),
 	}
 	priceResp, err := client.DescribeSpotPriceHistoryWithOptions(describeSpotPriceHistoryRequest, &util.RuntimeOptions{})
 	if err != nil {
