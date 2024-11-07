@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 
 	"github.com/cloudpilot-ai/priceserver/pkg/apis"
@@ -22,7 +23,7 @@ func handleAWSData() error {
 	awsPriceClient.RefreshSavingsPlanPrice("", "")
 
 	data := awsPriceClient.ListRegionsInstancesPrice()
-	marshalData, err := json.Marshal(data)
+	marshalData, err := json.MarshalIndent(data, "", "   ")
 	if err != nil {
 		return err
 	}
@@ -36,6 +37,9 @@ func handleAWSData() error {
 
 func handleAlibabaCloudData() error {
 	alibabaCloudAKSKPool := client.ExtractAlibabaCloudAKSKPool()
+	if alibabaCloudAKSKPool == nil {
+		return fmt.Errorf("empty aksk pool")
+	}
 
 	alibabaCloudClient, err := client.NewAlibabaCloudPriceClient(alibabaCloudAKSKPool, false)
 	if err != nil {
@@ -45,7 +49,7 @@ func handleAlibabaCloudData() error {
 	alibabaCloudClient.RefreshOnDemandPrice()
 
 	data := alibabaCloudClient.ListRegionsInstancesPrice()
-	marshalData, err := json.Marshal(data)
+	marshalData, err := json.MarshalIndent(data, "", "   ")
 	if err != nil {
 		return err
 	}
