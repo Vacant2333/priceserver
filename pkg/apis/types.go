@@ -1,5 +1,7 @@
 package apis
 
+import "k8s.io/apimachinery/pkg/util/sets"
+
 type RegionTypeKey struct {
 	Region       string
 	InstanceType string
@@ -12,10 +14,7 @@ type RegionalInstancePrice struct {
 }
 
 type InstanceTypePrice struct {
-	Arch                 string   `json:"arch"`
-	VCPU                 float64  `json:"vcpu"`
-	Memory               float64  `json:"memory"`
-	GPU                  float64  `json:"gpu"`
+	InstanceTypeMetadata
 	Zones                []string `json:"zones"`
 	OnDemandPricePerHour float64  `json:"onDemandPricePerHour"`
 	// AWSEC2Billing represents the cost of saving plan billing
@@ -23,6 +22,19 @@ type InstanceTypePrice struct {
 	AWSEC2Billing map[string]AWSEC2Billing `json:"awsEC2Billing,omitempty"`
 	// SpotPricePerHour represents the smallest spot price per hour in different zones
 	SpotPricePerHour map[string]float64 `json:"spotPricePerHour,omitempty"`
+}
+
+type InstanceInfo struct {
+	InstanceTypeMetadata
+	RegionsSet sets.Set[string] `json:"-"`
+	Regions    []string         `json:"regions"`
+}
+
+type InstanceTypeMetadata struct {
+	Arch   string  `json:"arch"`
+	VCPU   float64 `json:"vcpu"`
+	Memory float64 `json:"memory"`
+	GPU    float64 `json:"gpu"`
 }
 
 type AWSEC2Billing struct {
@@ -50,10 +62,12 @@ func (r *RegionalInstancePrice) DeepCopy() *RegionalInstancePrice {
 
 func (i *InstanceTypePrice) DeepCopy() *InstanceTypePrice {
 	d := &InstanceTypePrice{
-		Arch:                 i.Arch,
-		VCPU:                 i.VCPU,
-		Memory:               i.Memory,
-		GPU:                  i.GPU,
+		InstanceTypeMetadata: InstanceTypeMetadata{
+			Arch:   i.Arch,
+			VCPU:   i.VCPU,
+			Memory: i.Memory,
+			GPU:    i.GPU,
+		},
 		Zones:                make([]string, len(i.Zones)),
 		OnDemandPricePerHour: i.OnDemandPricePerHour,
 		AWSEC2Billing:        make(map[string]AWSEC2Billing),

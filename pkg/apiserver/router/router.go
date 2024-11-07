@@ -19,7 +19,7 @@ func NewPriceServerRouter(awsPriceClient *client.AWSPriceClient, alibabaCloudCli
 	corsHandler := cors.New(config)
 	router.Use(corsHandler)
 
-	router.Use(gzip.Gzip(gzip.DefaultCompression))
+	router.Use(gzip.Gzip(gzip.BestCompression))
 
 	router.Use(func(context *gin.Context) {
 		context.Set(apis.AWSPriceClientContextKey, awsPriceClient)
@@ -36,6 +36,8 @@ func NewPriceServerRouter(awsPriceClient *client.AWSPriceClient, alibabaCloudCli
 func initAWSPriceRouter(router *gin.Engine) {
 	group := router.Group("/api/v1/aws")
 	group.GET("/ec2/price", handler.ListAWSAllRegionEC2Price)
+	group.GET("/ec2/types", handler.ListAWSInstanceTypes)
+	group.GET("/ec2/types/:instance_type", handler.GetAWSInstanceInfo)
 	group.GET("/ec2/regions/:region/price", handler.ListAWSEC2Price)
 	group.GET("/ec2/regions/:region/types/:instance_type/price", handler.GetAWSEC2Price)
 }

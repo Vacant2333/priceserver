@@ -19,6 +19,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/savingsplans"
 	savingsplanstypes "github.com/aws/aws-sdk-go-v2/service/savingsplans/types"
 	"github.com/samber/lo"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog"
 
 	"github.com/cloudpilot-ai/priceserver/pkg/apis"
@@ -52,6 +53,9 @@ type AWSPriceClient struct {
 
 	dataMutex sync.Mutex
 	priceData map[string]*apis.RegionalInstancePrice
+	// instanceTypeName -> instanceInfo
+	instanceInfos map[string]*apis.InstanceInfo
+	instanceTypes []string
 }
 
 func NewAWSPriceClient(globalAK, globalSK, cnAK, cnSK string, initialSpotUpdate bool) (*AWSPriceClient, error) {
@@ -76,6 +80,7 @@ func NewAWSPriceClient(globalAK, globalSK, cnAK, cnSK string, initialSpotUpdate 
 		client.refreshSpotPrices("", "")
 	}
 
+	client.refreshInstanceTypeMetadataAndAvailableRegion()
 	return client, nil
 }
 
@@ -86,6 +91,9 @@ func (a *AWSPriceClient) Run(ctx context.Context) {
 	spotTicker := time.NewTicker(time.Minute * 30)
 	defer spotTicker.Stop()
 
+	metaTicker := time.NewTicker(time.Hour * 20)
+	defer metaTicker.Stop()
+
 	for {
 		select {
 		case <-odTicker.C:
@@ -93,6 +101,8 @@ func (a *AWSPriceClient) Run(ctx context.Context) {
 			a.RefreshSavingsPlanPrice("", "")
 		case <-spotTicker.C:
 			a.refreshSpotPrices("", "")
+		case <-metaTicker.C:
+			a.refreshInstanceTypeMetadataAndAvailableRegion()
 		case <-ctx.Done():
 			return
 		case k := <-a.triggerChannel:
@@ -154,6 +164,32 @@ func (a *AWSPriceClient) newEC2Client(region string) (*ec2.Client, error) {
 
 var spotBaseFilter = []types.Filter{
 	{Name: aws.String("product-description"), Values: []string{"Linux/UNIX"}},
+}
+
+// refresh the instanceTypeMetadata and instanceTypeAvailableRegion by priceData.
+func (a *AWSPriceClient) refreshInstanceTypeMetadataAndAvailableRegion() {
+	a.dataMutex.Lock()
+	defer a.dataMutex.Unlock()
+	a.instanceInfos = map[string]*apis.InstanceInfo{}
+	a.instanceTypes = []string{}
+
+	for region, data := range a.priceData {
+		for instanceType, priceData := range data.InstanceTypePrices {
+			if _, ok := a.instanceInfos[instanceType]; !ok {
+				a.instanceInfos[instanceType] = &apis.InstanceInfo{
+					InstanceTypeMetadata: priceData.InstanceTypeMetadata,
+					RegionsSet:           sets.Set[string]{},
+				}
+				a.instanceTypes = append(a.instanceTypes, instanceType)
+			}
+
+			a.instanceInfos[instanceType].RegionsSet.Insert(region)
+		}
+	}
+
+	for _, info := range a.instanceInfos {
+		info.Regions = info.RegionsSet.UnsortedList()
+	}
 }
 
 func (a *AWSPriceClient) handleSpotPrice(region string, filters []types.Filter) {
@@ -785,4 +821,18 @@ func (a *AWSPriceClient) GetInstancePrice(region, instanceType string) *apis.Ins
 	}
 
 	return d
+}
+
+func (a *AWSPriceClient) ListInstanceTypes() []string {
+	a.dataMutex.Lock()
+	defer a.dataMutex.Unlock()
+
+	return a.instanceTypes
+}
+
+func (a *AWSPriceClient) GetInstanceInfo(instanceType string) *apis.InstanceInfo {
+	a.dataMutex.Lock()
+	defer a.dataMutex.Unlock()
+
+	return a.instanceInfos[instanceType]
 }

@@ -391,10 +391,12 @@ func (a *AlibabaCloudPriceClient) listInstanceTypes(region string) (map[string]*
 			continue
 		}
 		ret[tea.StringValue(item.InstanceTypeId)] = &apis.InstanceTypePrice{
-			Arch:   extractECSArch(tea.ToString(item.CpuArchitecture)),
-			VCPU:   float64(tea.Int32Value(item.CpuCoreCount)),
-			Memory: float64(tea.Float32Value(item.MemorySize)),
-			GPU:    float64(tea.Int32Value(item.GPUAmount)),
+			InstanceTypeMetadata: apis.InstanceTypeMetadata{
+				Arch:   extractECSArch(tea.ToString(item.CpuArchitecture)),
+				VCPU:   float64(tea.Int32Value(item.CpuCoreCount)),
+				Memory: float64(tea.Float32Value(item.MemorySize)),
+				GPU:    float64(tea.Int32Value(item.GPUAmount)),
+			},
 			Zones: lo.Map(zonesResp.Body.Zones.Zone, func(item *ecsclient.DescribeZonesResponseBodyZonesZone, index int) string {
 				return tea.StringValue(item.ZoneId)
 			}),

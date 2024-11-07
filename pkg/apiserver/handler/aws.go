@@ -19,9 +19,31 @@ func ListAWSAllRegionEC2Price(ctx *gin.Context) {
 		abortWithFormattedData(ctx, http.StatusInternalServerError, err.Error())
 		return
 	}
-
 	data := awsClient.ListRegionsInstancesPrice()
 	returnFormattedData(ctx, http.StatusOK, data)
+}
+
+func ListAWSInstanceTypes(ctx *gin.Context) {
+	klog.V(4).Infof("Start to list aws instance types...")
+	awsClient, err := getAWSPriceClient(ctx)
+	if err != nil {
+		klog.Errorf("failed to get aws price client: %v", err)
+		abortWithFormattedData(ctx, http.StatusInternalServerError, err.Error())
+		return
+	}
+	returnFormattedData(ctx, http.StatusOK, awsClient.ListInstanceTypes())
+}
+
+func GetAWSInstanceInfo(ctx *gin.Context) {
+	klog.V(4).Infof("Start to get aws instance info...")
+	awsClient, err := getAWSPriceClient(ctx)
+	if err != nil {
+		klog.Errorf("failed to get aws price client: %v", err)
+		abortWithFormattedData(ctx, http.StatusInternalServerError, err.Error())
+		return
+	}
+	instanceType := ctx.Param("instance_type")
+	returnFormattedData(ctx, http.StatusOK, awsClient.GetInstanceInfo(instanceType))
 }
 
 func ListAWSEC2Price(ctx *gin.Context) {
