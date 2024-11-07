@@ -20,7 +20,7 @@ import (
 	ecsclient "github.com/alibabacloud-go/ecs-20140526/v4/client"
 	util "github.com/alibabacloud-go/tea-utils/v2/service"
 	"github.com/alibabacloud-go/tea/tea"
-	"github.com/samber/lo"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog"
 
@@ -359,13 +359,6 @@ func (a *AlibabaCloudPriceClient) listInstanceTypes(region string) (map[string]*
 		return nil, err
 	}
 
-	zonesResp, err := client.DescribeZonesWithOptions(&ecsclient.DescribeZonesRequest{RegionId: tea.String(region)},
-		&util.RuntimeOptions{})
-	if err != nil {
-		klog.Errorf("Failed to list zones in region %s:%v", region, err)
-		return nil, err
-	}
-
 	typesResp, err := client.DescribeInstanceTypesWithOptions(&ecsclient.DescribeInstanceTypesRequest{},
 		&util.RuntimeOptions{})
 	if err != nil {
@@ -384,12 +377,40 @@ func (a *AlibabaCloudPriceClient) listInstanceTypes(region string) (map[string]*
 		return nil, err
 	}
 
-	ret := map[string]*apis.InstanceTypePrice{}
-	for _, item := range typesResp.Body.InstanceTypes.InstanceType {
-		if !isSupportedResource(tea.StringValue(item.InstanceTypeId),
-			availableTypesResp.Body.AvailableZones.AvailableZone[0].AvailableResources.AvailableResource[0].SupportedResources) {
+	if availableTypesResp.Body == nil ||
+		availableTypesResp.Body.AvailableZones == nil ||
+		len(availableTypesResp.Body.AvailableZones.AvailableZone) == 0 {
+		klog.Errorf("Failed to get availabe instance types data")
+		return nil, fmt.Errorf("failed to get availabe instance types data")
+	}
+
+	availableTypesZone := map[string]sets.Set[string]{}
+	availableTypesRegion := map[string]sets.Set[string]{}
+	for _, zoneData := range availableTypesResp.Body.AvailableZones.AvailableZone {
+		if len(zoneData.AvailableResources.AvailableResource) == 0 ||
+			zoneData.AvailableResources.AvailableResource[0].SupportedResources == nil {
 			continue
 		}
+
+		for _, it := range zoneData.AvailableResources.AvailableResource[0].SupportedResources.SupportedResource {
+			if _, ok := availableTypesZone[tea.StringValue(it.Value)]; !ok {
+				availableTypesZone[tea.StringValue(it.Value)] = sets.Set[string]{}
+			}
+			if _, ok := availableTypesRegion[tea.StringValue(it.Value)]; !ok {
+				availableTypesRegion[tea.StringValue(it.Value)] = sets.Set[string]{}
+			}
+			availableTypesZone[tea.StringValue(it.Value)].Insert(tea.StringValue(zoneData.ZoneId))
+			availableTypesRegion[tea.StringValue(it.Value)].Insert(tea.StringValue(zoneData.RegionId))
+		}
+	}
+
+	ret := map[string]*apis.InstanceTypePrice{}
+	for _, item := range typesResp.Body.InstanceTypes.InstanceType {
+		regions, ok := availableTypesRegion[tea.StringValue(item.InstanceTypeId)]
+		if !ok || !regions.Has(region) {
+			continue
+		}
+
 		ret[tea.StringValue(item.InstanceTypeId)] = &apis.InstanceTypePrice{
 			InstanceTypeMetadata: apis.InstanceTypeMetadata{
 				Arch:   extractECSArch(tea.ToString(item.CpuArchitecture)),
@@ -397,24 +418,11 @@ func (a *AlibabaCloudPriceClient) listInstanceTypes(region string) (map[string]*
 				Memory: float64(tea.Float32Value(item.MemorySize)),
 				GPU:    float64(tea.Int32Value(item.GPUAmount)),
 			},
-			Zones: lo.Map(zonesResp.Body.Zones.Zone, func(item *ecsclient.DescribeZonesResponseBodyZonesZone, index int) string {
-				return tea.StringValue(item.ZoneId)
-			}),
+			Zones: availableTypesZone[tea.StringValue(item.InstanceTypeId)].UnsortedList(),
 		}
 	}
 
 	return ret, nil
-}
-
-func isSupportedResource(instanceType string,
-	supportedResource *ecsclient.DescribeAvailableResourceResponseBodyAvailableZonesAvailableZoneAvailableResourcesAvailableResourceSupportedResources) bool {
-	for _, i := range supportedResource.SupportedResource {
-		if tea.StringValue(i.Value) == instanceType {
-			return true
-		}
-	}
-
-	return false
 }
 
 func extractECSArch(unFormatedArch string) string {
