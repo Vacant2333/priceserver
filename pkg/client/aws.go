@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -43,6 +44,11 @@ type PriceItem struct {
 	} `json:"terms"`
 }
 
+type Instance struct {
+	Name string `json:"name"`
+	apis.InstanceTypeMetadata
+}
+
 type AWSPriceClient struct {
 	globalAK string
 	globalSK string
@@ -55,7 +61,7 @@ type AWSPriceClient struct {
 	priceData map[string]*apis.RegionalInstancePrice
 	// instanceTypeName -> instanceInfo
 	instanceInfos map[string]*apis.InstanceInfo
-	instanceTypes []string
+	instanceTypes []*Instance
 }
 
 func NewAWSPriceClient(globalAK, globalSK, cnAK, cnSK string, initialSpotUpdate bool) (*AWSPriceClient, error) {
@@ -171,7 +177,7 @@ func (a *AWSPriceClient) refreshInstanceTypeMetadataAndAvailableRegion() {
 	a.dataMutex.Lock()
 	defer a.dataMutex.Unlock()
 	a.instanceInfos = map[string]*apis.InstanceInfo{}
-	a.instanceTypes = []string{}
+	a.instanceTypes = []*Instance{}
 
 	for region, data := range a.priceData {
 		for instanceType, priceData := range data.InstanceTypePrices {
@@ -180,7 +186,10 @@ func (a *AWSPriceClient) refreshInstanceTypeMetadataAndAvailableRegion() {
 					InstanceTypeMetadata: priceData.InstanceTypeMetadata,
 					RegionsSet:           sets.Set[string]{},
 				}
-				a.instanceTypes = append(a.instanceTypes, instanceType)
+				a.instanceTypes = append(a.instanceTypes, &Instance{
+					Name:                 instanceType,
+					InstanceTypeMetadata: priceData.InstanceTypeMetadata,
+				})
 			}
 
 			a.instanceInfos[instanceType].RegionsSet.Insert(region)
@@ -188,8 +197,42 @@ func (a *AWSPriceClient) refreshInstanceTypeMetadataAndAvailableRegion() {
 	}
 
 	for _, info := range a.instanceInfos {
-		info.Regions = info.RegionsSet.UnsortedList()
+		regions := info.RegionsSet.UnsortedList()
+
+		// Sort the regions, the "us" region has a bigger priority.
+		sort.Slice(regions, func(i, j int) bool {
+			startsWithUSi := strings.HasPrefix(regions[i], "us")
+			startsWithUSj := strings.HasPrefix(regions[j], "us")
+
+			if startsWithUSi && !startsWithUSj {
+				return true
+			} else if !startsWithUSi && startsWithUSj {
+				return false
+			}
+
+			return regions[i] < regions[j]
+		})
+		info.Regions = regions
 	}
+
+	// Sort the instanceTypes by 1. Family 2. CPU 3. Memory 4. GPU
+	sort.Slice(a.instanceTypes, func(i, j int) bool {
+		familyI := strings.Split(a.instanceTypes[i].Name, ".")[0]
+		familyJ := strings.Split(a.instanceTypes[j].Name, ".")[0]
+		if familyI != familyJ {
+			return familyI < familyJ
+		}
+
+		infoI := a.instanceTypes[i].InstanceTypeMetadata
+		infoJ := a.instanceTypes[j].InstanceTypeMetadata
+		if infoI.VCPU != infoJ.VCPU {
+			return infoI.VCPU < infoJ.VCPU
+		}
+		if infoI.Memory != infoJ.Memory {
+			return infoI.Memory < infoJ.Memory
+		}
+		return infoI.GPU < infoJ.GPU
+	})
 }
 
 func (a *AWSPriceClient) handleSpotPrice(region string, filters []types.Filter) {
@@ -823,7 +866,7 @@ func (a *AWSPriceClient) GetInstancePrice(region, instanceType string) *apis.Ins
 	return d
 }
 
-func (a *AWSPriceClient) ListInstanceTypes() []string {
+func (a *AWSPriceClient) ListInstanceTypes() []*Instance {
 	a.dataMutex.Lock()
 	defer a.dataMutex.Unlock()
 
